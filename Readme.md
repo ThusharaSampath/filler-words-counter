@@ -23,7 +23,7 @@ This is a simple python based web application that can be used to count filler w
 ## How to use ? 
 1. Run the application.
 2. Navigate to the server via a browser. 
-3. Upload a audio file (<32MB).
+3. Upload an audio file (<32MB).
 4. Click **Analyze**. 
 5. After processing, you will have result similar to the following image.
 
