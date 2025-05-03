@@ -24,6 +24,29 @@
         padding: 2px 4px;
         border-radius: 3px;
       }
+      .progress-container {
+        width: 100%;
+        background-color: #e0e0e0;
+        border-radius: 4px;
+        margin: 20px 0;
+        display: none;
+      }
+      .progress-bar {
+        height: 20px;
+        border-radius: 4px;
+        background-color: #4caf50;
+        width: 0%;
+        transition: width 0.3s ease;
+        text-align: center;
+        color: white;
+        line-height: 20px;
+        font-size: 12px;
+      }
+      .status-text {
+        margin: 5px 0;
+        font-style: italic;
+        color: #666;
+      }
       .loader {
         border: 5px solid #f3f3f3;
         border-top: 5px solid #3498db;
@@ -56,8 +79,13 @@
           accept=".mp3,.wav,.ogg,.flac,.m4a"
           required
         />
-        <button type="submit">Analyze</button>
+        <button type="submit" id="submitBtn">Analyze</button>
       </form>
+
+      <div class="progress-container" id="progressContainer">
+        <div class="progress-bar" id="progressBar">0%</div>
+        <div class="status-text" id="statusText">Initializing...</div>
+      </div>
 
       <div class="loader" id="loader"></div>
 
@@ -88,6 +116,9 @@
         'sort of': ['sort of', 'sorta'],
       };
 
+      let currentFileId = null;
+      let progressInterval = null;
+
       document
         .getElementById('uploadForm')
         .addEventListener('submit', async function (e) {
@@ -95,37 +126,124 @@
 
           const fileInput = document.getElementById('audioFile');
           const file = fileInput.files[0];
+          const submitBtn = document.getElementById('submitBtn');
 
           if (!file) {
             alert('Please select a file');
             return;
           }
 
+          // Reset UI
+          document.getElementById('result').style.display = 'none';
+          document.getElementById('progressContainer').style.display = 'block';
+          document.getElementById('progressBar').style.width = '0%';
+          document.getElementById('progressBar').textContent = '0%';
+          document.getElementById('statusText').textContent =
+            'Uploading file...';
+          submitBtn.disabled = true;
+
+          // Stop any existing progress checks
+          if (progressInterval) {
+            clearInterval(progressInterval);
+          }
+
           const formData = new FormData();
           formData.append('file', file);
 
-          document.getElementById('loader').style.display = 'block';
-          document.getElementById('result').style.display = 'none';
-
           try {
+            // Start the analysis process
             const response = await fetch('/analyze', {
               method: 'POST',
               body: formData,
             });
 
-            const data = await response.json();
-
-            if (response.ok) {
-              displayResults(data);
-            } else {
-              alert('Error: ' + data.error);
+            if (!response.ok) {
+              const error = await response.json();
+              throw new Error(error.error || 'Error starting analysis');
             }
+
+            const data = await response.json();
+            currentFileId = data.file_id;
+
+            // Update status text
+            document.getElementById('statusText').textContent =
+              'Processing audio...';
+
+            // Start polling for progress
+            checkProgress();
+            progressInterval = setInterval(checkProgress, 1000);
           } catch (error) {
+            document.getElementById('progressContainer').style.display = 'none';
             alert('Error: ' + error.message);
-          } finally {
-            document.getElementById('loader').style.display = 'none';
+            submitBtn.disabled = false;
           }
         });
+
+      async function checkProgress() {
+        if (!currentFileId) return;
+
+        try {
+          const isFinalCheck = false;
+          const response = await fetch(
+            `/progress/${currentFileId}?final=${isFinalCheck}`,
+          );
+
+          if (!response.ok) {
+            clearInterval(progressInterval);
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('submitBtn').disabled = false;
+
+            if (response.status === 404) {
+              // Job not found or already completed
+              return;
+            }
+
+            const error = await response.json();
+            throw new Error(error.error || 'Error checking progress');
+          }
+
+          const data = await response.json();
+
+          // Update progress bar
+          const progressBar = document.getElementById('progressBar');
+          progressBar.style.width = `${data.progress}%`;
+          progressBar.textContent = `${data.progress}%`;
+
+          // Update status text based on current processing step
+          let statusText = 'Processing...';
+          if (data.status === 'processing') statusText = 'Processing audio...';
+          if (data.status === 'transcribing')
+            statusText = 'Transcribing speech...';
+          if (data.status === 'analyzing')
+            statusText = 'Analyzing filler words...';
+
+          document.getElementById('statusText').textContent = statusText;
+
+          // If complete, get the final result and display
+          if (data.status === 'complete') {
+            clearInterval(progressInterval);
+
+            // Make one final request to get results and clean up server-side
+            const finalResponse = await fetch(
+              `/progress/${currentFileId}?final=true`,
+            );
+            if (finalResponse.ok) {
+              const finalData = await finalResponse.json();
+              if (finalData.result) {
+                displayResults(finalData.result);
+              }
+            }
+
+            document.getElementById('submitBtn').disabled = false;
+            currentFileId = null;
+          }
+        } catch (error) {
+          clearInterval(progressInterval);
+          document.getElementById('progressContainer').style.display = 'none';
+          document.getElementById('submitBtn').disabled = false;
+          alert('Error checking progress: ' + error.message);
+        }
+      }
 
       function displayResults(data) {
         const fillerCountsElement = document.getElementById('fillerCounts');
