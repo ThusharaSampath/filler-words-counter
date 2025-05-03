@@ -100,10 +100,10 @@
 
     <script>
       // Define filler words for highlighting in the frontend
-      const FILLER_WORDS = {
-        um: ['um', 'uhm'],
-        uh: ['uh', 'uhh'],
+      FILLER_WORDS = {
+        um: ['um', 'uhm', 'ums'],
         ah: ['ah', 'ahh'],
+        err: ['err', 'er'],
         mmm: ['mmm', 'hmm'],
         like: ['like'],
         'you know': ['you know'],
@@ -114,6 +114,8 @@
         literally: ['literally'],
         'kind of': ['kind of', 'kinda'],
         'sort of': ['sort of', 'sorta'],
+        'you know what I mean': ['you know what I mean'],
+        well: ['well'],
       };
 
       let currentFileId = null;
