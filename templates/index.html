@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Filler Word Analyzer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .container {
+        background-color: #f9f9f9;
+        padding: 20px;
+        border-radius: 5px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      .result {
+        margin-top: 20px;
+        display: none;
+      }
+      .filler-word {
+        background-color: #ffecb3;
+        padding: 2px 4px;
+        border-radius: 3px;
+      }
+      .loader {
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #3498db;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        animation: spin 2s linear infinite;
+        display: none;
+        margin: 20px auto;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Filler Word Analyzer</h1>
+      <p>Upload an audio file to analyze for filler words.</p>
+
+      <form id="uploadForm">
+        <input
+          type="file"
+          id="audioFile"
+          accept=".mp3,.wav,.ogg,.flac,.m4a"
+          required
+        />
+        <button type="submit">Analyze</button>
+      </form>
+
+      <div class="loader" id="loader"></div>
+
+      <div class="result" id="result">
+        <h2>Analysis Results</h2>
+        <div id="fillerCounts"></div>
+        <p>Total words: <span id="totalWords"></span></p>
+        <h3>Transcription:</h3>
+        <div id="transcription"></div>
+      </div>
+    </div>
+
+    <script>
+      // Define filler words for highlighting in the frontend
+      const FILLER_WORDS = {
+        um: ['um', 'uhm'],
+        uh: ['uh', 'uhh'],
+        ah: ['ah', 'ahh'],
+        mmm: ['mmm', 'hmm'],
+        like: ['like'],
+        'you know': ['you know'],
+        'I mean': ['i mean'],
+        so: ['so'],
+        basically: ['basically'],
+        actually: ['actually'],
+        literally: ['literally'],
+        'kind of': ['kind of', 'kinda'],
+        'sort of': ['sort of', 'sorta'],
+      };
+
+      document
+        .getElementById('uploadForm')
+        .addEventListener('submit', async function (e) {
+          e.preventDefault();
+
+          const fileInput = document.getElementById('audioFile');
+          const file = fileInput.files[0];
+
+          if (!file) {
+            alert('Please select a file');
+            return;
+          }
+
+          const formData = new FormData();
+          formData.append('file', file);
+
+          document.getElementById('loader').style.display = 'block';
+          document.getElementById('result').style.display = 'none';
+
+          try {
+            const response = await fetch('/analyze', {
+              method: 'POST',
+              body: formData,
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+              displayResults(data);
+            } else {
+              alert('Error: ' + data.error);
+            }
+          } catch (error) {
+            alert('Error: ' + error.message);
+          } finally {
+            document.getElementById('loader').style.display = 'none';
+          }
+        });
+
+      function displayResults(data) {
+        const fillerCountsElement = document.getElementById('fillerCounts');
+        fillerCountsElement.innerHTML = '';
+
+        // Create table for filler counts
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.marginBottom = '20px';
+
+        // Add header row
+        const headerRow = table.insertRow();
+        const headerCell1 = headerRow.insertCell(0);
+        const headerCell2 = headerRow.insertCell(1);
+        headerCell1.innerHTML = '<b>Filler Word</b>';
+        headerCell2.innerHTML = '<b>Count</b>';
+        headerCell1.style.border = '1px solid #ddd';
+        headerCell2.style.border = '1px solid #ddd';
+        headerCell1.style.padding = '8px';
+        headerCell2.style.padding = '8px';
+
+        // Add data rows
+        for (const [word, count] of Object.entries(data.filler_counts)) {
+          const row = table.insertRow();
+          const cell1 = row.insertCell(0);
+          const cell2 = row.insertCell(1);
+          cell1.textContent = word;
+          cell2.textContent = count;
+          cell1.style.border = '1px solid #ddd';
+          cell2.style.border = '1px solid #ddd';
+          cell1.style.padding = '8px';
+          cell2.style.padding = '8px';
+        }
+
+        fillerCountsElement.appendChild(table);
+
+        document.getElementById('totalWords').textContent = data.total_words;
+
+        // Highlight filler words in transcription
+        const transcription = data.transcription;
+        let highlightedText = transcription;
+
+        for (const [word, variants] of Object.entries(FILLER_WORDS)) {
+          for (const variant of variants) {
+            const pattern = new RegExp('\\b' + variant + '\\b', 'gi');
+            highlightedText = highlightedText.replace(
+              pattern,
+              (match) => `<span class="filler-word">${match}</span>`,
+            );
+          }
+        }
+
+        document.getElementById('transcription').innerHTML = highlightedText;
+        document.getElementById('result').style.display = 'block';
+      }
+    </script>
+  </body>
+</html>
