@@ -14,15 +14,22 @@
         padding: 20px;
         border-radius: 5px;
         box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
       }
       .result {
         margin-top: 20px;
         display: none;
       }
       .filler-word {
-        background-color: #ffecb3;
+        background-color: #ffecb3; /* Yellow for filler words */
         padding: 2px 4px;
         border-radius: 3px;
+      }
+      .realtime-filler-word {
+        background-color: #ffcdd2; /* Light red for real-time filler words */
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-weight: bold;
       }
       .progress-container {
         width: 100%;
@@ -65,6 +72,25 @@
           transform: rotate(360deg);
         }
       }
+      #realtimeContainer {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid #ccc;
+      }
+      #realtimeTranscription {
+        border: 1px solid #ddd;
+        padding: 10px;
+        min-height: 100px;
+        background-color: #fff;
+        margin-top: 10px;
+        white-space: pre-wrap; /* Preserve line breaks and spaces */
+        word-wrap: break-word;
+      }
+      button {
+        padding: 8px 15px;
+        margin-right: 10px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -79,7 +105,7 @@
           accept=".mp3,.wav,.ogg,.flac,.m4a"
           required
         />
-        <button type="submit" id="submitBtn">Analyze</button>
+        <button type="submit" id="submitBtn">Analyze Uploaded File</button>
       </form>
 
       <div class="progress-container" id="progressContainer">
@@ -98,26 +124,39 @@
       </div>
     </div>
 
+    <div class="container" id="realtimeContainer">
+      <h2>Real-time Transcription</h2>
+      <p>
+        Click "Start Listening" to transcribe your speech live from the
+        microphone.
+      </p>
+      <button id="startRealtimeBtn">Start Listening</button>
+      <button id="stopRealtimeBtn" disabled>Stop Listening</button>
+      <div id="realtimeStatus">Status: Idle</div>
+      <h3>Live Transcription:</h3>
+      <div id="realtimeTranscription"></div>
+    </div>
+
     <script>
-      // Define filler words for highlighting in the frontend
-      FILLER_WORDS = {
+      const FILLER_WORDS = {
         um: ['um', 'uhm', 'ums'],
         ah: ['ah', 'ahh'],
         err: ['err', 'er'],
         mmm: ['mmm', 'hmm'],
         like: ['like'],
         'you know': ['you know'],
-        'I mean': ['i mean'],
+        'i mean': ['i mean'],
         so: ['so'],
         basically: ['basically'],
         actually: ['actually'],
         literally: ['literally'],
         'kind of': ['kind of', 'kinda'],
         'sort of': ['sort of', 'sorta'],
-        'you know what I mean': ['you know what I mean'],
+        'you know what i mean': ['you know what i mean'],
         well: ['well'],
       };
 
+      // --- Existing File Upload JS ---
       let currentFileId = null;
       let progressInterval = null;
 
@@ -125,7 +164,7 @@
         .getElementById('uploadForm')
         .addEventListener('submit', async function (e) {
           e.preventDefault();
-
+          // ... (existing code for file upload remains the same)
           const fileInput = document.getElementById('audioFile');
           const file = fileInput.files[0];
           const submitBtn = document.getElementById('submitBtn');
@@ -135,7 +174,7 @@
             return;
           }
 
-          // Reset UI
+          // Reset UI for file upload
           document.getElementById('result').style.display = 'none';
           document.getElementById('progressContainer').style.display = 'block';
           document.getElementById('progressBar').style.width = '0%';
@@ -143,6 +182,7 @@
           document.getElementById('statusText').textContent =
             'Uploading file...';
           submitBtn.disabled = true;
+          document.getElementById('loader').style.display = 'block';
 
           // Stop any existing progress checks
           if (progressInterval) {
@@ -160,8 +200,10 @@
             });
 
             if (!response.ok) {
-              const error = await response.json();
-              throw new Error(error.error || 'Error starting analysis');
+              const errorData = await response
+                .json()
+                .catch(() => ({ error: 'Unknown error starting analysis' }));
+              throw new Error(errorData.error || 'Error starting analysis');
             }
 
             const data = await response.json();
@@ -172,10 +214,11 @@
               'Processing audio...';
 
             // Start polling for progress
-            checkProgress();
-            progressInterval = setInterval(checkProgress, 1000);
+            checkProgress(); // Initial check
+            progressInterval = setInterval(checkProgress, 2000); // Poll every 2 seconds
           } catch (error) {
             document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('loader').style.display = 'none';
             alert('Error: ' + error.message);
             submitBtn.disabled = false;
           }
@@ -183,48 +226,52 @@
 
       async function checkProgress() {
         if (!currentFileId) return;
+        const submitBtn = document.getElementById('submitBtn');
 
         try {
-          const isFinalCheck = false;
+          const isFinalCheck = false; // This will be determined by the response status
           const response = await fetch(
-            `/progress/${currentFileId}?final=${isFinalCheck}`,
-          );
+            `/progress/${currentFileId}?final=false`,
+          ); // Don't send final=true yet
 
           if (!response.ok) {
             clearInterval(progressInterval);
+            progressInterval = null;
             document.getElementById('progressContainer').style.display = 'none';
-            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('loader').style.display = 'none';
+            submitBtn.disabled = false;
 
             if (response.status === 404) {
-              // Job not found or already completed
+              // Job not found or already completed and cleaned up
+              alert('Analysis session expired or not found.');
               return;
             }
-
-            const error = await response.json();
-            throw new Error(error.error || 'Error checking progress');
+            const errorData = await response
+              .json()
+              .catch(() => ({ error: 'Error checking progress' }));
+            throw new Error(errorData.error || 'Error checking progress');
           }
 
           const data = await response.json();
 
-          // Update progress bar
           const progressBar = document.getElementById('progressBar');
           progressBar.style.width = `${data.progress}%`;
           progressBar.textContent = `${data.progress}%`;
 
-          // Update status text based on current processing step
-          let statusText = 'Processing...';
-          if (data.status === 'processing') statusText = 'Processing audio...';
+          let statusUIText = 'Processing...';
+          if (data.status === 'queued') statusUIText = 'In queue...';
+          if (data.status === 'processing')
+            statusUIText = 'Processing audio...';
           if (data.status === 'transcribing')
-            statusText = 'Transcribing speech...';
+            statusUIText = 'Transcribing speech...';
           if (data.status === 'analyzing')
-            statusText = 'Analyzing filler words...';
+            statusUIText = 'Analyzing filler words...';
+          document.getElementById('statusText').textContent = statusUIText;
 
-          document.getElementById('statusText').textContent = statusText;
-
-          // If complete, get the final result and display
           if (data.status === 'complete') {
             clearInterval(progressInterval);
-
+            progressInterval = null;
+            document.getElementById('loader').style.display = 'none';
             // Make one final request to get results and clean up server-side
             const finalResponse = await fetch(
               `/progress/${currentFileId}?final=true`,
@@ -233,65 +280,100 @@
               const finalData = await finalResponse.json();
               if (finalData.result) {
                 displayResults(finalData.result);
+                document.getElementById('progressContainer').style.display =
+                  'none'; // Hide progress bar on success
+              } else {
+                document.getElementById('statusText').textContent =
+                  'Failed to retrieve final results.';
               }
+            } else {
+              const errorData = await finalResponse
+                .json()
+                .catch(() => ({ error: 'Error fetching final results' }));
+              alert('Error fetching final results: ' + errorData.error);
+              document.getElementById('progressContainer').style.display =
+                'none';
             }
-
-            document.getElementById('submitBtn').disabled = false;
+            submitBtn.disabled = false;
+            currentFileId = null;
+          } else if (data.status === 'error') {
+            clearInterval(progressInterval);
+            progressInterval = null;
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('progressContainer').style.display = 'none';
+            alert('Analysis Error: ' + data.error);
+            submitBtn.disabled = false;
             currentFileId = null;
           }
         } catch (error) {
           clearInterval(progressInterval);
+          progressInterval = null;
+          document.getElementById('loader').style.display = 'none';
           document.getElementById('progressContainer').style.display = 'none';
-          document.getElementById('submitBtn').disabled = false;
+          submitBtn.disabled = false;
           alert('Error checking progress: ' + error.message);
+          currentFileId = null; // Reset to prevent further calls for this ID
         }
       }
 
       function displayResults(data) {
+        // ... (existing displayResults function remains the same)
         const fillerCountsElement = document.getElementById('fillerCounts');
-        fillerCountsElement.innerHTML = '';
+        fillerCountsElement.innerHTML = ''; // Clear previous results
 
-        // Create table for filler counts
         const table = document.createElement('table');
         table.style.width = '100%';
         table.style.borderCollapse = 'collapse';
         table.style.marginBottom = '20px';
 
-        // Add header row
         const headerRow = table.insertRow();
         const headerCell1 = headerRow.insertCell(0);
         const headerCell2 = headerRow.insertCell(1);
         headerCell1.innerHTML = '<b>Filler Word</b>';
         headerCell2.innerHTML = '<b>Count</b>';
         headerCell1.style.border = '1px solid #ddd';
-        headerCell2.style.border = '1px solid #ddd';
         headerCell1.style.padding = '8px';
+        headerCell2.style.border = '1px solid #ddd';
         headerCell2.style.padding = '8px';
 
-        // Add data rows
-        for (const [word, count] of Object.entries(data.filler_counts)) {
+        if (data.filler_counts && Object.keys(data.filler_counts).length > 0) {
+          for (const [word, count] of Object.entries(data.filler_counts)) {
+            const row = table.insertRow();
+            const cell1 = row.insertCell(0);
+            const cell2 = row.insertCell(1);
+            cell1.textContent = word;
+            cell2.textContent = count;
+            cell1.style.border = '1px solid #ddd';
+            cell1.style.padding = '8px';
+            cell2.style.border = '1px solid #ddd';
+            cell2.style.padding = '8px';
+          }
+        } else {
           const row = table.insertRow();
-          const cell1 = row.insertCell(0);
-          const cell2 = row.insertCell(1);
-          cell1.textContent = word;
-          cell2.textContent = count;
-          cell1.style.border = '1px solid #ddd';
-          cell2.style.border = '1px solid #ddd';
-          cell1.style.padding = '8px';
-          cell2.style.padding = '8px';
+          const cell = row.insertCell(0);
+          cell.colSpan = 2;
+          cell.textContent = 'No filler words detected.';
+          cell.style.textAlign = 'center';
+          cell.style.padding = '8px';
         }
-
         fillerCountsElement.appendChild(table);
 
-        document.getElementById('totalWords').textContent = data.total_words;
+        document.getElementById('totalWords').textContent =
+          data.total_words || 0;
 
-        // Highlight filler words in transcription
-        const transcription = data.transcription;
+        const transcription =
+          data.transcription || '[No transcription available]';
         let highlightedText = transcription;
 
-        for (const [word, variants] of Object.entries(FILLER_WORDS)) {
+        // Highlight filler words - make sure to escape for RegExp
+        for (const [_, variants] of Object.entries(FILLER_WORDS)) {
           for (const variant of variants) {
-            const pattern = new RegExp('\\b' + variant + '\\b', 'gi');
+            // Escape special characters in variant for RegExp
+            const escapedVariant = variant.replace(
+              /[.*+?^${}()|[\]\\]/g,
+              '\\$&',
+            );
+            const pattern = new RegExp('\\b' + escapedVariant + '\\b', 'gi');
             highlightedText = highlightedText.replace(
               pattern,
               (match) => `<span class="filler-word">${match}</span>`,
@@ -301,6 +383,162 @@
 
         document.getElementById('transcription').innerHTML = highlightedText;
         document.getElementById('result').style.display = 'block';
+      }
+
+      // --- New Real-time Transcription JS ---
+      let socket;
+      let audioContext;
+      let processor;
+      let mediaStreamSource;
+      let localStream; // To store the stream for stopping
+
+      const startRealtimeBtn = document.getElementById('startRealtimeBtn');
+      const stopRealtimeBtn = document.getElementById('stopRealtimeBtn');
+      const realtimeStatus = document.getElementById('realtimeStatus');
+      const realtimeTranscriptionDiv = document.getElementById(
+        'realtimeTranscription',
+      );
+
+      const desiredSampleRate = 16000; // Whisper expects 16kHz
+      const bufferSize = 4096; // Common buffer size
+
+      startRealtimeBtn.addEventListener('click', async () => {
+        try {
+          realtimeStatus.textContent =
+            'Status: Requesting microphone access...';
+          localStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+          realtimeStatus.textContent = 'Status: Microphone accessed.';
+
+          audioContext = new (window.AudioContext || window.webkitAudioContext)(
+            {
+              sampleRate: desiredSampleRate, // Request desired sample rate
+            },
+          );
+
+          // Check if the browser could provide the desired sample rate
+          if (audioContext.sampleRate !== desiredSampleRate) {
+            console.warn(
+              `Could not get desired sample rate of ${desiredSampleRate}Hz. Got ${audioContext.sampleRate}Hz. Resampling might be needed or quality might vary.`,
+            );
+            // Ideally, you'd resample here if it's critical, or inform the user.
+            // For now, we proceed with the browser's given rate and let backend handle if it's different.
+            // However, Whisper is quite specific about 16kHz.
+            // If backend also expects 16kHz and browser can't provide it, this will be an issue.
+            // Let's assume for now we will try to enforce it via constraints or hope the common case is 16kHz or 48kHz (which can be downsampled)
+          }
+
+          mediaStreamSource = audioContext.createMediaStreamSource(localStream);
+          processor = audioContext.createScriptProcessor(bufferSize, 1, 1); // bufferSize, inputChannels, outputChannels
+
+          processor.onaudioprocess = (e) => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              const inputData = e.inputBuffer.getChannelData(0); // Float32Array
+              // We need to send raw bytes. Float32Array.buffer gives an ArrayBuffer.
+              socket.send(inputData.buffer);
+            }
+          };
+
+          mediaStreamSource.connect(processor);
+          processor.connect(audioContext.destination); // Required for onaudioprocess to fire in some browsers
+
+          // Determine WebSocket protocol based on current page protocol
+          const wsProtocol =
+            window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          const wsUrl = `${wsProtocol}//${window.location.host}/realtime_transcribe`;
+          socket = new WebSocket(wsUrl);
+
+          socket.onopen = () => {
+            realtimeStatus.textContent = 'Status: Connected. Listening...';
+            startRealtimeBtn.disabled = true;
+            stopRealtimeBtn.disabled = false;
+            realtimeTranscriptionDiv.innerHTML = ''; // Clear previous transcription
+          };
+
+          socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'partial_transcript' && data.text) {
+              let segmentText = data.text;
+              // Highlight filler words in this segment
+              for (const [_, variants] of Object.entries(FILLER_WORDS)) {
+                for (const variant of variants) {
+                  const escapedVariant = variant.replace(
+                    /[.*+?^${}()|[\]\\]/g,
+                    '\\$&',
+                  );
+                  const pattern = new RegExp(
+                    '\\b' + escapedVariant + '\\b',
+                    'gi',
+                  );
+                  segmentText = segmentText.replace(
+                    pattern,
+                    (match) =>
+                      `<span class="realtime-filler-word">${match}</span>`,
+                  );
+                }
+              }
+              realtimeTranscriptionDiv.innerHTML += segmentText + ' '; // Append with a space
+              realtimeTranscriptionDiv.scrollTop =
+                realtimeTranscriptionDiv.scrollHeight; // Auto-scroll
+            } else if (data.type === 'error') {
+              realtimeStatus.textContent = `Status: Error - ${data.message}`;
+              console.error('WebSocket error:', data.message);
+            } else if (data.type === 'status') {
+              console.log('WebSocket status:', data.text);
+            }
+          };
+
+          socket.onclose = () => {
+            realtimeStatus.textContent =
+              'Status: Disconnected. Click Start to retry.';
+            cleanupRealtime();
+          };
+
+          socket.onerror = (error) => {
+            console.error('WebSocket Error:', error);
+            realtimeStatus.textContent =
+              'Status: Connection error. Check console.';
+            cleanupRealtime();
+          };
+        } catch (err) {
+          console.error('Error starting real-time transcription:', err);
+          realtimeStatus.textContent = `Status: Error - ${err.message}`;
+          cleanupRealtime();
+        }
+      });
+
+      stopRealtimeBtn.addEventListener('click', () => {
+        if (socket) {
+          socket.close(); // This will trigger onclose and cleanup
+        }
+        // If socket didn't trigger cleanup (e.g. was never opened), ensure cleanup
+        cleanupRealtime();
+        realtimeStatus.textContent = 'Status: Stopped by user.';
+      });
+
+      function cleanupRealtime() {
+        if (localStream) {
+          localStream.getTracks().forEach((track) => track.stop());
+          localStream = null;
+        }
+        if (mediaStreamSource) {
+          mediaStreamSource.disconnect();
+          mediaStreamSource = null;
+        }
+        if (processor) {
+          processor.disconnect();
+          processor = null;
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+          audioContext
+            .close()
+            .catch((e) => console.warn('Error closing AudioContext:', e));
+          audioContext = null;
+        }
+        startRealtimeBtn.disabled = false;
+        stopRealtimeBtn.disabled = true;
       }
     </script>
   </body>
